@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>INTERCEPT SIM // CMD-CTR</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --green: #00ff88;
+    --green-dim: #00aa55;
+    --green-dark: #003322;
+    --amber: #ffaa00;
+    --red: #ff3333;
+    --bg: #050e0a;
+    --panel: #080f0b;
+    --border: #00441e;
+    --text: #00cc66;
+    --text-dim: #006633;
+    --mono: 'Share Tech Mono', monospace;
+    --display: 'Orbitron', sans-serif;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  /* ── SCANLINE OVERLAY ── */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  #app {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    grid-template-rows: 48px 1fr 120px;
+    height: 100vh;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  /* ── HEADER ── */
+  #header {
+    grid-column: 1 / -1;
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  #header h1 {
+    font-family: var(--display);
+    font-size: 14px;
+    letter-spacing: 4px;
+    color: var(--green);
+  }
+  #header-status {
+    display: flex; gap: 24px;
+    font-size: 11px; color: var(--text-dim);
+  }
+  #header-status span { display: flex; align-items: center; gap: 6px; }
+  .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s;
+  }
+  .dot.active { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.warn   { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .dot.danger { background: var(--red);   box-shadow: 0 0 6px var(--red);   }
+  #tick-counter { font-family: var(--display); font-size: 11px; color: var(--green-dim); }
+
+  /* ── VIEWPORT ── */
+  #viewport {
+    background: #020a06;
+    position: relative;
+    overflow: hidden;
+  }
+  #three-canvas {
+    width: 100%; height: 100%;
+    display: block;
+  }
+  #viewport-label {
+    position: absolute; top: 12px; left: 16px;
+    font-size: 10px; letter-spacing: 3px; color: var(--text-dim);
+    font-family: var(--display);
+  }
+  #viewport-mode {
+    position: absolute; top: 12px; right: 16px;
+    font-size: 10px; color: var(--green-dim); letter-spacing: 2px;
+  }
+
+  /* ── CONTROL PANEL ── */
+  #panel {
+    background: var(--panel);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title {
+    font-family: var(--display);
+    font-size: 9px; letter-spacing: 3px;
+    color: var(--text-dim); margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+
+  label {
+    display: block;
+    font-size: 11px; color: var(--text-dim);
+    margin-bottom: 4px; letter-spacing: 1px;
+  }
+
+  select, input[type=range], input[type=number] {
+    width: 100%;
+    background: #020a06;
+    border: 1px solid var(--border);
+    color: var(--green);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 8px;
+    margin-bottom: 10px;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    border-radius: 2px;
+  }
+  select:focus, input:focus { border-color: var(--green-dim); }
+  select option { background: #020a06; }
+
+  input[type=range] {
+    padding: 4px 0; cursor: pointer; height: 24px;
+    accent-color: var(--green);
+    background: transparent;
+  }
+
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .row label { margin: 0; white-space: nowrap; }
+  .row input { margin: 0; flex: 1; }
+  .val { min-width: 28px; text-align: right; color: var(--green); font-size: 12px; }
+
+  /* ── BUTTONS ── */
+  .btn {
+    display: block; width: 100%;
+    padding: 9px 0;
+    background: transparent;
+    border: 1px solid var(--green-dim);
+    color: var(--green);
+    font-family: var(--display);
+    font-size: 10px; letter-spacing: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-bottom: 6px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .btn:hover  { background: var(--green-dark); border-color: var(--green); }
+  .btn:active { transform: scale(0.98); }
+  .btn.fire   { border-color: var(--red); color: var(--red); }
+  .btn.fire:hover { background: rgba(255,51,51,0.1); border-color: #ff6666; }
+  .btn.amber  { border-color: var(--amber); color: var(--amber); }
+  .btn.amber:hover { background: rgba(255,170,0,0.1); }
+  .btn.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+
+  /* ── RADAR PARAMS (collapsible) ── */
+  #radar-params { display: none; }
+  #radar-params.open { display: block; }
+
+  /* ── LOG ── */
+  #log-panel {
+    grid-column: 1 / -1;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    display: flex; gap: 0;
+    overflow: hidden;
+  }
+  #log-area {
+    flex: 1; overflow-y: auto; padding: 10px 16px;
+    font-size: 11px; line-height: 1.8;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  #stats-area {
+    width: 300px; border-left: 1px solid var(--border);
+    padding: 10px 16px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  }
+  .stat { background: #020a06; border: 1px solid var(--border); padding: 6px 10px; border-radius: 2px; }
+  .stat-label { font-size: 9px; color: var(--text-dim); letter-spacing: 2px; }
+  .stat-val { font-family: var(--display); font-size: 16px; color: var(--green); margin-top: 2px; }
+  .stat-val.warn { color: var(--amber); }
+  .stat-val.danger { color: var(--red); }
+
+  .log-line { margin: 0; }
+  .log-line.intercept { color: var(--green); }
+  .log-line.launch    { color: var(--amber); }
+  .log-line.warn      { color: var(--red); }
+  .log-line.info      { color: var(--text-dim); }
+
+  /* ── BOGEY CLICK TARGET LIST ── */
+  #target-list { margin-top: 4px; }
+  .target-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 8px; margin-bottom: 4px;
+    border: 1px solid var(--border); border-radius: 2px;
+    cursor: pointer; transition: background 0.1s;
+    font-size: 11px;
+  }
+  .target-row:hover { background: var(--green-dark); }
+  .target-row.dead  { opacity: 0.3; cursor: default; }
+  .target-row.dead:hover { background: transparent; }
+  .trk-id   { color: var(--green); font-family: var(--display); font-size: 10px; }
+  .trk-type { color: var(--text-dim); font-size: 10px; }
+  .trk-dist { color: var(--amber); font-size: 10px; }
+  .trk-fire-btn {
+    font-size: 9px; color: var(--red); border: 1px solid rgba(255,51,51,0.4);
+    background: transparent; padding: 2px 6px; cursor: pointer; border-radius: 2px;
+    font-family: var(--mono);
+  }
+  .trk-fire-btn:hover { background: rgba(255,51,51,0.15); }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- HEADER -->
+  <header id="header">
+    <h1>// INTERCEPT SIM // CMD-CTR-01</h1>
+    <div id="header-status">
+      <span><div class="dot" id="dot-ws"></div> WS</span>
+      <span><div class="dot" id="dot-sim"></div> SIM</span>
+      <span><div class="dot" id="dot-radar"></div> RADAR</span>
+      <span><div class="dot" id="dot-threat"></div> THREAT</span>
+    </div>
+    <div id="tick-counter">TICK: <span id="tick-val">——</span></div>
+  </header>
+
+  <!-- 3D VIEWPORT -->
+  <div id="viewport">
+    <canvas id="three-canvas"></canvas>
+    <div id="viewport-label">TACTICAL DISPLAY // 3D</div>
+    <div id="viewport-mode" id="mode-label">MODE: STANDBY</div>
+  </div>
+
+  <!-- CONTROL PANEL -->
+  <div id="panel">
+
+    <div class="section">
+      <div class="section-title">Target Configuration</div>
+
+      <label>Target Type</label>
+      <select id="sel-target">
+        <option value="aircraft">Aircraft</option>
+        <option value="drone">Drone (UAV)</option>
+        <option value="cruise_missile">Cruise Missile</option>
+        <option value="ballistic_missile">Ballistic Missile</option>
+        <option value="helicopter">Helicopter</option>
+      </select>
+
+      <label>Number of Bogeys</label>
+      <div class="row">
+        <input type="range" id="n-bogeys" min="1" max="12" value="3"/>
+        <span class="val" id="n-bogeys-val">3</span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Homing Guidance</div>
+      <label>Guidance Mode</label>
+      <select id="sel-homing">
+        <!-- homing_options: add new modes here AND in main.py run_tick() -->
+        <option value="proportional_navigation">Proportional Navigation (PN)</option>
+        <option value="active_radar">Active Radar (ARH)</option>
+        <option value="sarh">Semi-Active Radar (SARH)</option>
+        <option value="ir_seeking">Infrared Seeking (IR)</option>
+        <option value="command_detonation">Command / MCLOS</option>
+      </select>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Radar System</div>
+      <label>Radar Mode</label>
+      <select id="sel-radar">
+        <!-- radar_modes: add new modes here AND in main.py run_tick() -->
+        <option value="pulse_doppler">Pulse-Doppler</option>
+        <option value="fmcw">FMCW</option>
+        <option value="phased_array">Phased Array (AESA)</option>
+        <option value="bistatic">Bistatic</option>
+      </select>
+
+      <button class="btn" id="btn-radar-toggle" onclick="toggleRadarParams()" style="margin-bottom:8px; font-size:9px;">
+        ▶ RADAR PARAMETERS
+      </button>
+
+      <div id="radar-params">
+        <label>Tx Power (kW)</label>
+        <div class="row">
+          <input type="range" id="rp-power" min="1" max="500" value="100"/>
+          <span class="val" id="rp-power-val">100</span>
+        </div>
+        <label>Frequency (GHz)</label>
+        <div class="row">
+          <input type="range" id="rp-freq" min="1" max="35" value="10" step="0.5"/>
+          <span class="val" id="rp-freq-val">10</span>
+        </div>
+        <label>Antenna Gain (dB)</label>
+        <div class="row">
+          <input type="range" id="rp-gain" min="10" max="50" value="35"/>
+          <span class="val" id="rp-gain-val">35</span>
+        </div>
+        <label>Noise Figure (dB)</label>
+        <div class="row">
+          <input type="range" id="rp-nf" min="1" max="15" value="5"/>
+          <span class="val" id="rp-nf-val">5</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Fire Control</div>
+      <button class="btn disabled" id="btn-launch" onclick="launchSim()">⬛ Launch Simulation</button>
+      <button class="btn fire disabled" id="btn-fire-all" onclick="fireAll()">⚡ Fire All Interceptors</button>
+      <button class="btn amber disabled" id="btn-stop" onclick="stopSim()">■ Stop</button>
+    </div>
+
+    <div class="section" style="flex:1">
+      <div class="section-title">Track List</div>
+      <div id="target-list"><span style="color:var(--text-dim); font-size:11px;">— NO TRACKS —</span></div>
+    </div>
+
+  </div>
+
+  <!-- LOG BAR -->
+  <div id="log-panel">
+    <div id="log-area"></div>
+    <div id="stats-area">
+      <div class="stat">
+        <div class="stat-label">BOGEYS</div>
+        <div class="stat-val" id="st-bogeys">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">MISSILES</div>
+        <div class="stat-val" id="st-missiles">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">INTERCEPTS</div>
+        <div class="stat-val" id="st-intercepts">0</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">THREATS</div>
+        <div class="stat-val danger" id="st-threats">0</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- THREE.JS -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  THREE.JS SCENE SETUP
+// ═══════════════════════════════════════════════════════
+
+const canvas = document.getElementById('three-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x020a06, 1);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 5000);
+camera.position.set(180, 120, 180);
+camera.lookAt(0, 0, 0);
+
+// ── RESIZE ──
+function resizeRenderer() {
+  const vp = document.getElementById('viewport');
+  const w = vp.clientWidth, h = vp.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeRenderer);
+resizeRenderer();
+
+// ── GRID ──
+const gridHelper = new THREE.GridHelper(400, 20, 0x003322, 0x001a0d);
+scene.add(gridHelper);
+
+// ── AXES ──
+const axMat = (hex) => new THREE.LineBasicMaterial({ color: hex });
+const axLine = (pts, mat) => { const g=new THREE.BufferGeometry().setFromPoints(pts); return new THREE.Line(g,mat); };
+scene.add(axLine([new THREE.Vector3(0,0,0),new THREE.Vector3(80,0,0)], axMat(0x004400)));
+scene.add(axLine([new THREE.Vector3(0,0,0),new THREE.Vector3(0,80,0)], axMat(0x004400)));
+scene.add(axLine([new THREE.Vector3(0,0,0),new THREE.Vector3(0,0,80)], axMat(0x004400)));
+
+// ── COMMAND CENTER ──
+const cmdGeo  = new THREE.OctahedronGeometry(3, 0);
+const cmdMat  = new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true });
+const cmdMesh = new THREE.Mesh(cmdGeo, cmdMat);
+scene.add(cmdMesh);
+
+// Pulse ring
+const ringGeo = new THREE.RingGeometry(4, 5, 32);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
+const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+ringMesh.rotation.x = -Math.PI/2;
+scene.add(ringMesh);
+
+// ── RANGE RINGS ──
+for (const r of [100, 200, 300]) {
+  const pts = [];
+  for (let i = 0; i <= 64; i++) {
+    const a = (i/64)*Math.PI*2;
+    pts.push(new THREE.Vector3(r*Math.cos(a), 0, r*Math.sin(a)));
+  }
+  const rg = new THREE.BufferGeometry().setFromPoints(pts);
+  const rl = new THREE.Line(rg, new THREE.LineBasicMaterial({ color: 0x001a0d }));
+  scene.add(rl);
+}
+
+// ── ORBIT CONTROLS (manual) ──
+let isDragging = false, prevMouse = {x:0,y:0};
+let spherical = { theta: 0.8, phi: 0.6, r: 320 };
+
+function updateCamera() {
+  camera.position.set(
+    spherical.r * Math.sin(spherical.phi) * Math.sin(spherical.theta),
+    spherical.r * Math.cos(spherical.phi),
+    spherical.r * Math.sin(spherical.phi) * Math.cos(spherical.theta)
+  );
+  camera.lookAt(0, 0, 0);
+}
+updateCamera();
+
+canvas.addEventListener('mousedown', e => { isDragging = true; prevMouse={x:e.clientX,y:e.clientY}; });
+window.addEventListener('mouseup', () => isDragging=false);
+window.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - prevMouse.x, dy = e.clientY - prevMouse.y;
+  spherical.theta -= dx * 0.005;
+  spherical.phi = Math.max(0.1, Math.min(Math.PI/2-0.05, spherical.phi + dy*0.005));
+  prevMouse = {x:e.clientX,y:e.clientY};
+  updateCamera();
+});
+canvas.addEventListener('wheel', e => {
+  spherical.r = Math.max(50, Math.min(800, spherical.r + e.deltaY * 0.3));
+  updateCamera();
+});
+
+// ── ENTITY POOLS ──
+const bogeyMeshes  = {};  // id → mesh
+const missileMeshes = {}; // id → mesh
+const trailPoints   = {}; // id → array of vec3
+const TRAIL_LEN = 60;
+
+function kmToScene(pos) {
+  return new THREE.Vector3(pos[0], pos[1] * 8, pos[2]);  // scale altitude for visibility
+}
+
+function getOrCreateBogey(id) {
+  if (!bogeyMeshes[id]) {
+    const g = new THREE.SphereGeometry(2.5, 8, 8);
+    const m = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+    const mesh = new THREE.Mesh(g, m);
+    scene.add(mesh);
+    bogeyMeshes[id] = mesh;
+    trailPoints[`b${id}`] = [];
+  }
+  return bogeyMeshes[id];
+}
+
+function getOrCreateMissile(id) {
+  if (!missileMeshes[id]) {
+    const g = new THREE.ConeGeometry(1, 5, 6);
+    const m = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+    const mesh = new THREE.Mesh(g, m);
+    scene.add(mesh);
+    missileMeshes[id] = mesh;
+    trailPoints[`m${id}`] = [];
+  }
+  return missileMeshes[id];
+}
+
+const trailLines = {};
+function updateTrail(key, pos, color) {
+  const pts = trailPoints[key];
+  pts.push(pos.clone());
+  if (pts.length > TRAIL_LEN) pts.shift();
+  if (trailLines[key]) scene.remove(trailLines[key]);
+  if (pts.length < 2) return;
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5 }));
+  scene.add(l);
+  trailLines[key] = l;
+}
+
+function flashIntercept(pos) {
+  const g = new THREE.SphereGeometry(8, 12, 12);
+  const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, wireframe: true });
+  const mesh = new THREE.Mesh(g, m);
+  mesh.position.copy(pos);
+  scene.add(mesh);
+  let t = 0;
+  const fade = setInterval(() => {
+    t += 0.05;
+    mesh.material.opacity = Math.max(0, 0.9 - t*2);
+    mesh.scale.setScalar(1 + t*3);
+    if (t > 0.5) { clearInterval(fade); scene.remove(mesh); }
+  }, 30);
+}
+
+// ── RENDER LOOP ──
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  // Pulse command center
+  cmdMesh.rotation.y = t * 0.5;
+  ringMesh.material.opacity = 0.15 + 0.1*Math.sin(t*2);
+  const pulse = 0.5 + 0.5*Math.sin(t*2);
+  ringMesh.scale.setScalar(1 + 0.05*pulse);
+
+  renderer.render(scene, camera);
+}
+animate();
+
+
+// ═══════════════════════════════════════════════════════
+//  UI CONTROLS
+// ═══════════════════════════════════════════════════════
+
+function bindSlider(id, outId) {
+  const el = document.getElementById(id);
+  const out = document.getElementById(outId);
+  el.addEventListener('input', () => out.textContent = el.value);
+}
+bindSlider('n-bogeys','n-bogeys-val');
+bindSlider('rp-power','rp-power-val');
+bindSlider('rp-freq','rp-freq-val');
+bindSlider('rp-gain','rp-gain-val');
+bindSlider('rp-nf','rp-nf-val');
+
+function toggleRadarParams() {
+  const rp = document.getElementById('radar-params');
+  const btn = document.getElementById('btn-radar-toggle');
+  const open = rp.classList.toggle('open');
+  btn.textContent = (open ? '▼' : '▶') + ' RADAR PARAMETERS';
+}
+
+let seenIntercepts = new Set();
+
+
+// ═══════════════════════════════════════════════════════
+//  WEBSOCKET
+// ═══════════════════════════════════════════════════════
+
+let ws = null;
+
+function connectWS() {
+  ws = new WebSocket('ws://localhost:8000/ws');
+
+  ws.onopen = () => {
+    setDot('dot-ws', 'active');
+    log('info', 'WebSocket connected to backend.');
+    document.getElementById('btn-launch').classList.remove('disabled');
+  };
+
+  ws.onclose = () => {
+    setDot('dot-ws', '');
+    setDot('dot-sim', '');
+    log('warn', 'WebSocket disconnected. Retrying in 3s...');
+    document.getElementById('btn-launch').classList.add('disabled');
+    document.getElementById('btn-fire-all').classList.add('disabled');
+    document.getElementById('btn-stop').classList.add('disabled');
+    setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => {
+    log('warn', 'Cannot reach backend at ws://localhost:8000. Is it running?');
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'ack') { log('info', msg.msg); return; }
+    if (msg.type === 'state') handleState(msg);
+  };
+}
+
+connectWS();
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function buildConfig() {
+  return {
+    target_type:   document.getElementById('sel-target').value,
+    n_bogeys:      parseInt(document.getElementById('n-bogeys').value),
+    homing_mode:   document.getElementById('sel-homing').value,
+    radar_mode:    document.getElementById('sel-radar').value,
+    radar_params: {
+      power_kw:          parseFloat(document.getElementById('rp-power').value),
+      freq_ghz:          parseFloat(document.getElementById('rp-freq').value),
+      antenna_gain_db:   parseFloat(document.getElementById('rp-gain').value),
+      noise_figure_db:   parseFloat(document.getElementById('rp-nf').value),
+      bandwidth_mhz:     1,
+      prf_hz:            5000,
+    }
+  };
+}
+
+function launchSim() {
+  // Clean up old meshes
+  Object.keys(bogeyMeshes).forEach(id => scene.remove(bogeyMeshes[id]));
+  Object.keys(missileMeshes).forEach(id => scene.remove(missileMeshes[id]));
+  Object.keys(trailLines).forEach(id => scene.remove(trailLines[id]));
+  for (const k in bogeyMeshes)  delete bogeyMeshes[k];
+  for (const k in missileMeshes) delete missileMeshes[k];
+  for (const k in trailLines)   delete trailLines[k];
+  for (const k in trailPoints)  delete trailPoints[k];
+  seenIntercepts.clear();
+  clearTargetList();
+
+  send({ cmd: 'launch_sim', config: buildConfig() });
+  setDot('dot-sim', 'active');
+  setDot('dot-radar', 'active');
+  document.getElementById('btn-fire-all').classList.remove('disabled');
+  document.getElementById('btn-stop').classList.remove('disabled');
+  log('launch', `Simulation launched. Type: ${buildConfig().target_type.toUpperCase()} ×${buildConfig().n_bogeys} | Homing: ${buildConfig().homing_mode}`);
+  document.getElementById('mode-label').textContent = 'MODE: ACTIVE';
+}
+
+function fireAll() { send({ cmd: 'fire_all' }); log('launch', 'All interceptors launched.'); }
+function stopSim() {
+  send({ cmd: 'stop' });
+  setDot('dot-sim', '');
+  log('info', 'Simulation stopped.');
+  document.getElementById('mode-label').textContent = 'MODE: STANDBY';
+}
+function fireMissile(targetId) { send({ cmd: 'fire_missile', target_id: targetId }); }
+
+
+// ═══════════════════════════════════════════════════════
+//  STATE HANDLER
+// ═══════════════════════════════════════════════════════
+
+function handleState(msg) {
+  document.getElementById('tick-val').textContent = msg.tick;
+
+  const aliveBogeys   = msg.bogeys.filter(b => b.alive).length;
+  const activeMissiles = msg.missiles.filter(m => m.alive).length;
+  document.getElementById('st-bogeys').textContent    = aliveBogeys;
+  document.getElementById('st-missiles').textContent  = activeMissiles;
+  document.getElementById('st-intercepts').textContent = msg.intercepts.length;
+  document.getElementById('st-threats').textContent   = aliveBogeys;
+  setDot('dot-threat', aliveBogeys > 0 ? 'danger' : '');
+
+  // Update bogey meshes
+  for (const b of msg.bogeys) {
+    const mesh = getOrCreateBogey(b.id);
+    const p = kmToScene(b.pos);
+    mesh.position.copy(p);
+    mesh.visible = b.alive;
+    if (b.alive) updateTrail(`b${b.id}`, p, 0xff3333);
+  }
+
+  // Update missile meshes
+  for (const m of msg.missiles) {
+    const mesh = getOrCreateMissile(m.id);
+    const p = kmToScene(m.pos);
+    mesh.position.copy(p);
+    mesh.visible = m.alive;
+    if (m.alive) updateTrail(`m${m.id}`, p, 0xffaa00);
+  }
+
+  // Flash intercepts
+  for (const ix of msg.intercepts) {
+    const key = `${ix.bogey_id}-${ix.missile_id}`;
+    if (!seenIntercepts.has(key)) {
+      seenIntercepts.add(key);
+      flashIntercept(kmToScene(ix.pos));
+      log('intercept', `INTERCEPT: Bogey #${ix.bogey_id} destroyed at [${ix.pos.map(v=>v.toFixed(1)).join(', ')}] km  (T+${ix.tick})`);
+    }
+  }
+
+  // Update track list
+  updateTargetList(msg.bogeys);
+}
+
+function updateTargetList(bogeys) {
+  const el = document.getElementById('target-list');
+  el.innerHTML = '';
+  if (!bogeys.length) { el.innerHTML = '<span style="color:var(--text-dim);font-size:11px;">— NO TRACKS —</span>'; return; }
+  for (const b of bogeys) {
+    const dist = Math.sqrt(b.pos[0]**2 + b.pos[1]**2 + b.pos[2]**2).toFixed(1);
+    const row = document.createElement('div');
+    row.className = 'target-row' + (b.alive ? '' : ' dead');
+    row.innerHTML = `
+      <span class="trk-id">TGT-${String(b.id).padStart(2,'0')}</span>
+      <span class="trk-type">${b.type || '—'}</span>
+      <span class="trk-dist">${dist} km</span>
+      ${b.alive ? `<button class="trk-fire-btn" onclick="fireMissile(${b.id})">FIRE</button>` : '<span style="color:var(--green);font-size:10px;">KIA</span>'}
+    `;
+    el.appendChild(row);
+  }
+}
+
+function clearTargetList() {
+  document.getElementById('target-list').innerHTML = '<span style="color:var(--text-dim);font-size:11px;">— NO TRACKS —</span>';
+}
+
+
+// ═══════════════════════════════════════════════════════
+//  LOG
+// ═══════════════════════════════════════════════════════
+
+function log(type, msg) {
+  const el = document.getElementById('log-area');
+  const now = new Date();
+  const ts = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+  const p = document.createElement('p');
+  p.className = `log-line ${type}`;
+  p.textContent = `[${ts}] ${msg}`;
+  el.appendChild(p);
+  el.scrollTop = el.scrollHeight;
+  while (el.children.length > 80) el.removeChild(el.firstChild);
+}
+
+
+// ═══════════════════════════════════════════════════════
+//  STATUS DOTS
+// ═══════════════════════════════════════════════════════
+
+function setDot(id, state) {
+  const d = document.getElementById(id);
+  d.className = 'dot' + (state ? ' '+state : '');
+}
+</script>
+</body>
+</html>
