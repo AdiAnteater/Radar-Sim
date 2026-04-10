@@ -203,6 +203,10 @@ def guidance_active_radar(missile: dict, target: dict, dt: float) -> dict:
 # RADAR MODES  — implement detection & tracking math here
 # ─────────────────────────────────────────────────────────────────────────────
 
+def Swerling_model():
+    #placeholder - need to implement Swerling
+    return
+
 def radar_pulse_doppler(targets: list, radar_params: dict) -> list:
     """
     Pulse-Doppler Radar
@@ -242,9 +246,58 @@ def radar_pulse_doppler(targets: list, radar_params: dict) -> list:
     R_ambiguous = C_LIGHT / (2 * prf) #max unambiguous range (range beyond this will alis - echoes will be confusing)
 
     for t in targets:
-        continue
-    
-    return _stub_perfect_detection(targets)
+        pos = t["pos"]
+        vel = t["vel"]
+
+        px_m = pos[0] * 1e3
+        py_m = pos[1] * 1e3
+        pz_m = pos[2] * 1e3
+
+        R_m = math.sqrt(px_m**2 + py_m**2 + pz_m**2)
+        
+        if R_m < 1.0:  #avoiding singularity 0 target is inside radar (checking just in case)
+            t.update({"detected": False, "snr_db": -999 , "range_m": 0.0, "range_rate_mps": 0.0, "azimuth_deg": 0.0, "elevation_deg": 0.0})
+            continue
+
+        ux, uy, uz = px_m / R_m, py_m / R_m, pz_m / R_m
+
+        #azimuth and elevation
+        az_rad = math.atan2(ux, uz)
+        el_rad = math.asin(uy)
+        az_deg = math.degrees(az_rad)
+        el_deg = math.degrees(el_rad)
+
+        #Radial velocity
+        v_mps = (vel[0] * ux + vel[1] * uy + vel[2] * uz) * 1e3
+
+        #Doppler shift
+        f_d = 2 * (-v_mps) * f_c / C_LIGHT
+
+        #Radar Cross Section
+        sigma = t.get("profile", {}).get("rcs_m2", 1.0)
+
+        speed_mps = math.sqrt(vel[0]**2 + vel[1]**2 + vel[2]**2) *1e9 or 1e-9
+        cos_aspect = v_mps / speed_mps
+        rcs_aspect_factor = 0.5 * 0.5 * abs(math.sin(math.acos(max(-1.0, min(1.0, cos_aspect))))) #simple aspect factor - max at 90 deg aspect, zero at head/tail on
+        sigma_eff = sigma * rcs_aspect_factor
+
+        #SNR calculation
+        SNR_linear = num_const * sigma_eff / (R_m**4)
+        SNR_db = 10 * math.log10(max(SNR_linear, 1e-30))
+
+        snr_ok = SNR_db > SNR_THRESH_DB
+        range_ok = R_m <= R_ambiguous
+        f_mdv = 2.0 * V_MDV_MPS * f_c / C_LIGHT
+        doppler_ok = abs(f_d) >= f_mdv
+
+        detected = snr_ok and range_ok and doppler_ok
+
+        if detected:
+            t.update({"detected": True, "snr_db": SNR_db, "range_m": R_m, "range_rate_mps": v_mps, "azimuth_deg": az_deg, "elevation_deg": el_deg})
+        else:
+            t.update({"detected": False, "snr_db": SNR_db, "range_m": R_m, "range_rate_mps": v_mps, "azimuth_deg": az_deg, "elevation_deg": el_deg})
+        
+    return targets
 
 
 def radar_fmcw(targets: list, radar_params: dict) -> list:
