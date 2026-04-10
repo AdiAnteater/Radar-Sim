@@ -237,12 +237,12 @@ def radar_pulse_doppler(targets: list, radar_params: dict) -> list:
 
     #in linear units
     lam = C_LIGHT / f_c
-    G = 10^(G_db / 10)
-    F = 10^(F_db / 10)
-    L = 10^(L_SYS_DB / 10)
+    G = 10 ** (G_db / 10)
+    F = 10 ** (F_db / 10)
+    L = 10 ** (L_SYS_DB / 10)
 
     N0 = K_Boltz * T_SYS * B_hz * F * L #noise power in W - how much background noise in the receiver
-    num_const = (P_t * G^2 * lam^2) / ((4*math.pi)^3 * N0 * L) #does not change per target - radar strength factors
+    num_const = (P_t * G**2 * lam**2) / ((4*math.pi)**3 * N0 * L) #does not change per target - radar strength factors
     R_ambiguous = C_LIGHT / (2 * prf) #max unambiguous range (range beyond this will alis - echoes will be confusing)
 
     for t in targets:
