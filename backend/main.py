@@ -19,6 +19,16 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+
+# Physics Environment Constants
+
+C_LIGHT = 3e8
+K_Boltz = 1.38e-23
+T_SYS = 500.0
+L_SYS_DB = 3.0
+SNR_THRESH_DB = 13.0
+V_MDV_MPS = 3.0
+
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
@@ -213,6 +223,27 @@ def radar_pulse_doppler(targets: list, radar_params: dict) -> list:
         detected (bool), snr_db, range_m, range_rate_mps, azimuth_deg, elevation_deg
     """
     # <<< YOUR MATH HERE >>>
+
+    P_t = radar_params.get("power_kw", 100.0) * 1e3
+    f_c = radar_params.get("freq_ghz", 10.0) * 1e9
+    G_db = radar_params.get("antenna_gain_db", 30.0)
+    F_db = radar_params.get("noise_figure_db", 5.0)
+    B_hz = radar_params.get("bandwidth_mhz", 10.0) * 1e6
+    prf = radar_params.get("prf_hz", 5000.0)
+
+    #in linear units
+    lam = C_LIGHT / f_c
+    G = 10^(G_db / 10)
+    F = 10^(F_db / 10)
+    L = 10^(L_SYS_DB / 10)
+
+    N0 = K_Boltz * T_SYS * B_hz * F * L #noise power in W - how much background noise in the receiver
+    num_const = (P_t * G^2 * lam^2) / ((4*math.pi)^3 * N0 * L) #does not change per target - radar strength factors
+    R_ambiguous = C_LIGHT / (2 * prf) #max unambiguous range (range beyond this will alis - echoes will be confusing)
+
+    for t in targets:
+        continue
+    
     return _stub_perfect_detection(targets)
 
 
